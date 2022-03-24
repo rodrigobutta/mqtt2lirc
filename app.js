@@ -1,75 +1,131 @@
 #!/usr/bin/env node
 
-const mqtt = require('mqtt');
-const client = mqtt.connect('mqtt://192.168.0.234', {
-	username: 'mqttuser',
-	password: 'mqttpassword',
-	port: 1883,
-});
+const Mqtt = require('mqtt');
+const Lirc = require('lirc-client');
+const log = require('yalm');
 
-var exec = require('child_process').exec;
-var sleep = require('sleep');
-const config = require('config');
-var util = require('util');
-
-var devicesConfig = config.get('devices');
-var devicesKeys = Object.keys(devicesConfig);
-
-client.on('connect', function () {
-	var topic;
-	for (var i = 0, len = devicesKeys.length; i < len; i++) {
-		topic = devicesKeys[i];
-		client.subscribe(topic);
-		console.log('subscribed to ' + topic);
-	}
-});
-
-client.on('message', (topic, message) => {
-	console.log('topic: ' + topic + '  message: ' + message);
-	var deviceName = topic.replace(/^remote\//, '');
-	var devices = devicesConfig[deviceName];
-	var device = devices.device;
-	var remoteKey;
-	var command = 'irsend SEND_ONCE %s %s';
-	var commandList = [];
-
-	var m = message.toString();
-	if (m.startsWith('ChangeChannel')) {
-		var keyPrefix = devices.keyMap['ChangeChannel'];
-
-		var channel = m.match(/ChangeChannel (.*)/)[1];
-		if (isNaN(channel)) {
-			console.log('ERROR: channel was not a number: ' + channel);
-			return;
-		}
-		var i = channel.length;
-		while (i--) {
-			remoteKey = keyPrefix + channel[i];
-			commandList.push(util.format(command, device, remoteKey));
-		}
-		command = util.format(command, device, remoteKey);
-	} else {
-		remoteKey = devices.keyMap[m];
-		commandList.push(util.format(command, device, remoteKey));
-	}
-	executeIrsend(commandList);
-});
-
-// sending seperate commands spaced out by 500ms because multiple keys
-// in one irsend command is too fast for my Cable box to pick up.
-var executeIrsend = function (commandList) {
-	var result;
-	var irCommand = commandList.pop();
-	exec(irCommand, (error, stdout, stderr) => {
-		result = stdout.trim();
-		if (!result) {
-			console.log('success executing: ' + irCommand);
-			if (commandList.length > 0) {
-				sleep.msleep(500);
-				executeIrsend(commandList);
-			}
-		} else {
-			console.log('ERROR: ' + error);
-		}
-	});
+const config = {
+	lircHost: '127.0.0.1',
+	lircPort: 8765,
+	mqttUrl: 'mqtt://192.168.0.234',
+	mqttUsername: 'mqttuser',
+	mqttPassword: 'mqttpassword',
+	device: 'zigbee2mqtt/0xa4c138870f3edb74',
+	topic: 'lirc',
+	json: false,
 };
+
+log.setLevel('debug');
+
+let lircConnected;
+
+log.info(
+	'lirc trying to connect on ' + config.lircHost + ':' + config.lircHost
+);
+
+const lirc = new Lirc({
+	host: config.lircHost,
+	port: config.lircPort,
+});
+
+if (typeof config.topic !== 'string') {
+	config.topic = '';
+}
+if (config.topic !== '' && !config.topic.match(/\/$/)) {
+	config.topic += '/';
+}
+
+let mqttConnected;
+
+log.info('mqtt trying to connect', config.mqttUrl);
+const mqtt = Mqtt.connect(config.mqttUrl, {
+	username: config.mqttUsername,
+	password: config.mqttPassword,
+	port: 1883,
+	will: { topic: config.device + '/connected', payload: '0' },
+});
+
+mqtt.on('connect', () => {
+	mqttConnected = true;
+	log.info('mqtt connected ' + config.mqttUrl);
+	mqtt.publish(config.device + '/connected', lircConnected ? '2' : '1');
+	log.info('mqtt subscribe', config.device + '/set/#');
+	// mqtt.subscribe(config.device + '/set/+/+');
+	mqtt.subscribe(config.device);
+});
+
+mqtt.on('close', () => {
+	if (mqttConnected) {
+		mqttConnected = false;
+		log.info('mqtt closed ' + config.mqttUrl);
+	}
+});
+
+mqtt.on('error', (err) => {
+	log.error('mqtt', err);
+});
+
+lirc.on('connect', () => {
+	log.info('lirc connected');
+	lircConnected = true;
+	mqtt.publish(config.device + '/connected', '2');
+});
+
+lirc.on('disconnect', () => {
+	if (lircConnected) {
+		log.info('lirc connection closed');
+		lircConnected = false;
+		mqtt.publish(config.device + '/connected', '1');
+	}
+});
+
+lirc.on('error', (err) => {
+	log.error('lirc', err);
+});
+
+lirc.on('receive', (remote, command, repeats) => {
+	log.debug('receive', remote, command, repeats);
+	const topic = config.topic + '/status/' + remote + '/' + command;
+	let payload;
+	if (config.json) {
+		payload = JSON.stringify({
+			val: parseInt(repeats, 10),
+		});
+	} else {
+		payload = String(parseInt(repeats, 10));
+	}
+	log.debug('mqtt >', topic, payload);
+	mqtt.publish(topic, payload);
+});
+
+mqtt.on('message', (topic, payload) => {
+	payload = payload.toString();
+	log.debug('mqtt <', topic, payload);
+
+	if (!lircConnected) {
+		log.error("lirc disconnected. can't send command.");
+		return;
+	}
+
+	const [, , remote, key] = topic.split('/');
+	let repeats = 0;
+	let cmd = 'SEND_ONCE';
+
+	if (payload.toUpperCase() === 'START') {
+		cmd = 'SEND_START';
+	} else if (payload.toUpperCase() === 'STOP') {
+		cmd = 'SEND_STOP';
+	} else if (payload) {
+		repeats = parseInt(payload, 10) || 0;
+	}
+
+	if (repeats) {
+		lirc.cmd(cmd, remote, key, repeats, () => {
+			log.debug('lirc >', cmd, remote, key, repeats);
+		});
+	} else {
+		lirc.cmd(cmd, remote, key, () => {
+			log.debug('lirc >', cmd, remote, key);
+		});
+	}
+});
