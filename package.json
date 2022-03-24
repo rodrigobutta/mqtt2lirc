@@ -1,0 +1,22 @@
+{
+	"name": "mqtt2lirc",
+	"version": "0.0.1",
+	"description": "mqtt to lirc",
+	"author": "Rodrigo Butta",
+	"license": "MIT",
+	"main": "app.js",
+	"scripts": {
+		"start": "node app.js",
+		"dev": "nodemon app.js",
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/rodrigobutta/mqtt2lirc.git"
+	},
+	"dependencies": {
+		"inherits": "^2.0.4",
+		"nodemon": "^2.0.15",
+		"sleep": "^6.3.0"
+	}
+}

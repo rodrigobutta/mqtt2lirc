@@ -1,0 +1,14 @@
+{
+	"devices": {
+		"zigbee2mqtt/0xa4c138870f3edb74": {
+			"device": "zigbee2mqtt/0xa4c138870f3edb74",
+			"keyMap": {
+				"TurnOn": "KEY_POWER",
+				"TurnOff": "KEY_POWER",
+				"AdjustVolume DOWN": "KEY_VOLUME_DOWN",
+				"AdjustVolume UP": "KEY_VOLUME_UP",
+				"SetMute": "KEY_MUTE"
+			}
+		}
+	}
+}
