@@ -15,7 +15,9 @@
 		"url": "git+https://github.com/rodrigobutta/mqtt2lirc.git"
 	},
 	"dependencies": {
+		"config": "^3.3.7",
 		"inherits": "^2.0.4",
+		"mqtt": "^4.3.7",
 		"nodemon": "^2.0.15",
 		"sleep": "^6.3.0"
 	}
